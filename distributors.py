@@ -20,7 +20,7 @@ DISTRIBUTOR_MAP = {
     "f4556f1e41604048bf9f93112ca6c6c2": "Too Lost",
     "17ae1e9e35ed421c954fbd421cfce541": "SonoSuite",
     "aa45cf37a7f84ddda54d7a4425b98ca7": "Ditto",
-    "e0b063f7069449558ac1b5e967fb01bd": "SounDrop",
+    "e0b063f7069449558ac1b5e967fb01bd": "Soundrop",
     "b3d83eb6b2ba444eacf033e311aac3cc": "Limbo Music",
     "4b67a8da63cd4496afa99dac7684a60e": "Virgin Music Group",
     "a830a34f35844bd784eac9a7fb395996": "TuneCore",
@@ -52,7 +52,18 @@ DISTRIBUTOR_MAP = {
     "58a1eb2962f14be29d203dd036cc2484": "Revelator",
     "2f1eee71461f4a8da1b33aa5014d2456": "Zojak World Wide",
     "53359c6a3bcb47e880d57db050de1e12": "OFFStep",
-
+    "0c9209c8eebe45e099231ea1157a7bb0": "Roc Nation",
+    "698e71b125a8476aa97aa411bb9b4fb9": "EMPIRE",
+    "fbc76191d67a41c5a5bd0fdaa8f315fc": "Catapult",
+    # not POSITIVE about catapult
+    "915f986857f94c6d8ede74191ebf61b1": "Stem",
+    "e8a0887f047541599e4253a08bfe9468": "The Recording Consort",
+    "e1d17e83962c49a090db9ad45b1af50c": "UnitedMasters",
+    "4546d863d0cb4f4c997743e29134f0af": "IndieMassive",
+    "45bf1bc1d269448fb31b105f286d8cc7": "Move Music",
+    "dca8cd5a4e4e4cd8a12609a0b30bd52d": "Danmark Music Group",
+    "eca54cc176a94cf3808a734e32feba87": "Loud Memory Records",
+    
 }
 
 def get_distributor(uuid: str) -> str:
