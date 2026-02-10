@@ -92,30 +92,50 @@ async def get_distributor_command(ctx, spotify_link: str = None):
             # Get track metadata
             metadata = spotify_client.get_track_metadata(gid)
             
+            # Debug: Always log the metadata structure to see what we're working with
+            print(f"DEBUG: Metadata response keys: {list(metadata.keys()) if isinstance(metadata, dict) else 'Not a dict'}")
+            print(f"DEBUG: Full metadata (first 1000 chars): {str(metadata)[:1000]}")
+            
             # Extract UUID from metadata
             # The metadata response structure may vary - adjust based on actual API response
             track_uuid = None
             
             # Try different possible fields in the response
             if isinstance(metadata, dict):
-                # Check for direct GID field
+                # Check for direct GID field (might be nested)
                 if 'gid' in metadata:
                     track_uuid = metadata['gid']
-                # Check for nested structure
+                    print(f"DEBUG: Found gid in root: {track_uuid}")
+                # Check for nested track structure
                 elif 'track' in metadata and isinstance(metadata['track'], dict):
-                    if 'gid' in metadata['track']:
-                        track_uuid = metadata['track']['gid']
+                    track_data = metadata['track']
+                    print(f"DEBUG: Track data keys: {list(track_data.keys())}")
+                    if 'gid' in track_data:
+                        track_uuid = track_data['gid']
+                        print(f"DEBUG: Found gid in track: {track_uuid}")
+                    # Check for other UUID fields
+                    elif 'uri' in track_data:
+                        uri = track_data['uri']
+                        print(f"DEBUG: Found URI: {uri}")
+                    # Check for album or other nested structures that might have the UUID
+                    if 'album' in track_data and isinstance(track_data['album'], dict):
+                        album_data = track_data['album']
+                        print(f"DEBUG: Album data keys: {list(album_data.keys())}")
+                        if 'gid' in album_data:
+                            # Album GID might be what we need
+                            print(f"DEBUG: Found album gid: {album_data['gid']}")
                 # Check for URI and extract UUID
                 elif 'uri' in metadata:
                     uri = metadata['uri']
                     if 'spotify:track:' in uri:
                         # Extract and convert if needed
-                        pass
+                        print(f"DEBUG: Found URI in root: {uri}")
                 
-                # Debug: print metadata structure if UUID not found
+                # If still no UUID found, log the full structure
                 if not track_uuid:
-                    print(f"DEBUG: Metadata keys: {list(metadata.keys())}")
-                    print(f"DEBUG: Full metadata: {metadata}")
+                    print(f"DEBUG: Could not find UUID in metadata. Full structure:")
+                    import json
+                    print(json.dumps(metadata, indent=2)[:2000])
             
             # Get distributor
             if track_uuid:
@@ -127,14 +147,11 @@ async def get_distributor_command(ctx, spotify_link: str = None):
                                   f"UUID: `{track_uuid}`\n"
                                   f"Add this mapping to `distributors.py` if you know the distributor.")
             else:
-                # Fallback: try using the GID directly
-                distributor = get_distributor(gid)
-                if distributor:
-                    await ctx.send(f"🎵 **Distributor:** {distributor}")
-                else:
-                    await ctx.send(f"❌ Could not extract UUID from track metadata.\n"
-                                  f"GID: `{gid}`\n"
-                                  f"Please check the API response structure.")
+                # Fallback: try using the GID directly, but also show what we found
+                await ctx.send(f"❌ Could not extract UUID from track metadata.\n"
+                              f"Calculated GID: `{gid}`\n"
+                              f"**Please check Railway logs for the full metadata structure.**\n"
+                              f"The UUID we need might be in a different field (like album.gid or label.gid).")
                     
     except ValueError as e:
         await ctx.send(f"❌ Invalid Spotify URL: {e}")
