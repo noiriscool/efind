@@ -54,7 +54,7 @@ class SpotifyClient:
             print("DEBUG: Successfully refreshed authentication token")
             print(f"DEBUG: Token set: {bool(self.token)}")
             print(f"DEBUG: Authorization header: {self.session.headers.get('authorization', 'NOT SET')[:50]}...")
-            print(f"DEBUG: sp_dc cookie present: {bool(self.session.cookies.get('sp_dc')))}")
+            print(f"DEBUG: sp_dc cookie present: {bool(self.session.cookies.get('sp_dc'))}")
         except Exception as e:
             print(f"WARNING: Failed to refresh token: {e}")
             raise  # Re-raise so caller knows refresh failed
