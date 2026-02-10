@@ -32,6 +32,7 @@ class SpotifyClient:
         self.session.cookies.set('sp_dc', dc_token)
         self.session.headers.update(HEADERS)
         self.token = None
+        self.token_expires_at = None
         self.dc_token = dc_token
         # Try to login, but don't fail if it doesn't work
         # We might be able to use sp_dc cookie directly
@@ -126,6 +127,10 @@ class SpotifyClient:
             
             self.token = token_data['accessToken']
             self.session.headers['authorization'] = f"Bearer {self.token}"
+            # Store expiration time if provided
+            if 'accessTokenExpirationTimestampMs' in token_data:
+                self.token_expires_at = int(token_data['accessTokenExpirationTimestampMs'])
+                print(f"DEBUG: Token expires at: {self.token_expires_at} (in {int((self.token_expires_at - time.time() * 1000) / 1000 / 60)} minutes)")
             print("DEBUG: Successfully authenticated with Spotify!")
         except requests.exceptions.RequestException as e:
             raise Exception(f"Network error during Spotify authentication: {e}")
@@ -148,6 +153,17 @@ class SpotifyClient:
         """Get track metadata from Spotify using GID."""
         url = f'https://spclient.wg.spotify.com/metadata/4/track/{gid}?market=from_token'
         
+        # Check if token is expired or about to expire (within 5 minutes)
+        if self.token and self.token_expires_at:
+            current_time_ms = int(time.time() * 1000)
+            time_until_expiry = (self.token_expires_at - current_time_ms) / 1000 / 60  # minutes
+            if time_until_expiry < 5:
+                print(f"DEBUG: Token expires in {time_until_expiry:.1f} minutes, refreshing proactively...")
+                try:
+                    self.refresh_auth()
+                except Exception as e:
+                    print(f"DEBUG: Proactive refresh failed: {e}")
+        
         for attempt in range(retry_count):
             try:
                 # Add timeout and retry logic
@@ -157,27 +173,44 @@ class SpotifyClient:
                     return res.json()
                 elif res.status_code == 401:
                     # Token might be expired, try to refresh
-                    print(f"DEBUG: Got 401 on attempt {attempt + 1}, trying to refresh token...")
+                    print(f"DEBUG: Got 401 on attempt {attempt + 1}, token may have expired. Refreshing...")
                     try:
                         # Try to refresh authentication
                         self.refresh_auth()
+                        # Small delay to ensure token is propagated
+                        import time
+                        time.sleep(0.5)
+                        # Verify token was set
+                        if not self.token:
+                            raise Exception("Token refresh failed - no token set")
+                        print(f"DEBUG: Token refreshed, retrying request with new token...")
                         # Retry the request with new token
                         res = self.session.get(url, timeout=15)
                         if res.status_code == 200:
+                            print(f"DEBUG: Successfully fetched metadata after token refresh")
                             return res.json()
                         elif res.status_code == 401:
-                            # Still 401 after refresh - sp_dc cookie is likely expired
-                            print("DEBUG: Still getting 401 after token refresh - sp_dc cookie is expired")
-                            print("DEBUG: The metadata API requires a valid sp_dc cookie, not just the access token")
-                            # Don't continue retrying if cookie is expired
-                            raise Exception(f"Authentication failed: 401 Unauthorized. Your sp_dc cookie has expired. Please get a fresh one from Spotify web player (open.spotify.com → DevTools → Cookies → sp_dc)")
+                            # Still 401 after refresh - might be sp_dc cookie issue or token not properly set
+                            print(f"DEBUG: Still getting 401 after token refresh")
+                            print(f"DEBUG: Current token present: {bool(self.token)}")
+                            print(f"DEBUG: Authorization header: {self.session.headers.get('authorization', 'NOT SET')[:50]}...")
+                            # Continue to next retry attempt instead of immediately failing
+                            if attempt < retry_count - 1:
+                                print(f"DEBUG: Will retry again (attempt {attempt + 2}/{retry_count})")
+                                continue
+                            else:
+                                raise Exception(f"Authentication failed: 401 Unauthorized after {retry_count} attempts. Token refresh succeeded but metadata API still returns 401. This may indicate the sp_dc cookie has expired.")
                     except Exception as e:
-                        print(f"DEBUG: Failed to refresh token: {e}")
-                        # If refresh failed, don't retry
-                        raise
-                    
-                    if attempt == retry_count - 1:
-                        raise Exception(f"Authentication failed: 401 Unauthorized after {retry_count} attempts. Your sp_dc cookie may have expired. Please get a fresh one from Spotify web player.")
+                        error_msg = str(e)
+                        # If it's our custom exception, re-raise it
+                        if "Authentication failed" in error_msg or "Token refresh failed" in error_msg:
+                            raise
+                        print(f"DEBUG: Exception during token refresh: {e}")
+                        # For other exceptions, continue to next retry
+                        if attempt < retry_count - 1:
+                            continue
+                        else:
+                            raise Exception(f"Failed to refresh token after {retry_count} attempts: {e}")
                 elif res.status_code == 429:
                     # Rate limited
                     wait_time = 2 ** attempt  # Exponential backoff
