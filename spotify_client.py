@@ -1,6 +1,6 @@
 import requests
-import pyotp
 import time
+from totp import TOTP, TOTPGenerationException
 
 TOKEN_URL = 'https://open.spotify.com/api/token'
 SERVER_TIME_URL = 'https://open.spotify.com/api/server-time'  # Fixed: was /server-time, should be /api/server-time
@@ -74,24 +74,22 @@ class SpotifyClient:
             
             print(f"DEBUG: Using server_time: {server_time}")
             
-            # Generate TOTP
-            # Note: The original code used a custom TOTP class from syrics.totp
-            # Spotify might not actually need TOTP - try without it first
-            # If that fails, we'll need to implement the custom TOTP
+            # Generate TOTP using the custom implementation
+            try:
+                totp = TOTP()
+                totp_value = totp.generate(server_time)
+                totp_version = totp.version
+                print(f"DEBUG: Generated TOTP: {totp_value}, version: {totp_version}")
+            except TOTPGenerationException as e:
+                raise Exception(f"Error generating TOTP: {e}")
             
-            # Try authentication WITHOUT TOTP first (some implementations don't need it)
             params = {
                 "reason": "init",
                 "productType": "web-player",
+                "totp": totp_value,
+                "totpVer": str(totp_version),
                 "ts": str(server_time),
             }
-            
-            # Only add TOTP if we have a valid secret (for now, skip it)
-            # totp_secret = "JBSWY3DPEHPK3PXP"  # Default secret - may need adjustment
-            # totp = pyotp.TOTP(totp_secret)
-            # totp_value = totp.now()
-            # params["totp"] = totp_value
-            # params["totpVer"] = "1"
             
             print(f"DEBUG: Auth params: {params}")
         except Exception as e:
