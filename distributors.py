@@ -10,6 +10,9 @@ DISTRIBUTOR_MAP = {
     # Example:
     # "0123456789abcdef0123456789abcdef": "DistroKid",
     # "fedcba9876543210fedcba9876543210": "CD Baby",
+    "7cd978677487466fb9aea2f219ba290b": "iGroove",
+    "ede63b46782e46e19045255f32c0ff0f": "The Orchard",
+    
 }
 
 def get_distributor(uuid: str) -> str:
