@@ -178,7 +178,6 @@ class SpotifyClient:
                         # Try to refresh authentication
                         self.refresh_auth()
                         # Small delay to ensure token is propagated
-                        import time
                         time.sleep(0.5)
                         # Verify token was set
                         if not self.token:
@@ -215,7 +214,6 @@ class SpotifyClient:
                     # Rate limited
                     wait_time = 2 ** attempt  # Exponential backoff
                     print(f"DEBUG: Rate limited, waiting {wait_time} seconds...")
-                    import time
                     time.sleep(wait_time)
                     continue
                 else:
@@ -225,13 +223,11 @@ class SpotifyClient:
                 if attempt == retry_count - 1:
                     raise Exception(f"Connection error after {retry_count} attempts: {e}")
                 print(f"DEBUG: Connection error on attempt {attempt + 1}, retrying...")
-                import time
                 time.sleep(1)
             except requests.exceptions.Timeout as e:
                 if attempt == retry_count - 1:
                     raise Exception(f"Request timed out after {retry_count} attempts: {e}")
                 print(f"DEBUG: Timeout on attempt {attempt + 1}, retrying...")
-                import time
                 time.sleep(1)
         
         raise Exception("Failed to fetch track metadata after all retries")
