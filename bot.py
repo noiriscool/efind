@@ -23,18 +23,25 @@ async def on_ready():
     global spotify_client
     
     print(f'{bot.user} has logged in!')
+    print(f'Bot ID: {bot.user.id}')
+    print('Bot is ready to receive commands!')
     
     # Get sp_dc token from environment variable
     sp_dc_token = os.getenv('SPOTIFY_SP_DC')
     if not sp_dc_token:
         print("WARNING: SPOTIFY_SP_DC environment variable not set!")
         print("The bot will not be able to authenticate with Spotify.")
+        print("Bot will still start, but distributor commands will not work.")
     else:
         try:
+            print("Attempting to authenticate with Spotify...")
             spotify_client = SpotifyClient(sp_dc_token)
             print("Successfully authenticated with Spotify!")
         except Exception as e:
             print(f"Failed to authenticate with Spotify: {e}")
+            print("Bot will still start, but distributor commands will not work.")
+            import traceback
+            traceback.print_exc()
 
 
 @bot.command(name='distributor', aliases=['distro', 'd'])
@@ -166,12 +173,22 @@ if __name__ == '__main__':
     discord_token = os.getenv('DISCORD_BOT_TOKEN')
     if not discord_token:
         print("ERROR: DISCORD_BOT_TOKEN environment variable not set!")
+        print("Please set DISCORD_BOT_TOKEN in Railway environment variables.")
         exit(1)
+    
+    print("Starting bot...")
+    print("Note: Bot will start even if Spotify authentication fails.")
     
     # Optional: Enable keep-alive for Replit (prevents bot from sleeping)
     # Uncomment the next 2 lines if hosting on Replit free tier
     # from keep_alive import keep_alive
     # keep_alive()
     
-    bot.run(discord_token)
+    try:
+        bot.run(discord_token)
+    except Exception as e:
+        print(f"Fatal error starting bot: {e}")
+        import traceback
+        traceback.print_exc()
+        exit(1)
 

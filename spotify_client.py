@@ -1,5 +1,6 @@
 import requests
 import pyotp
+import time
 
 TOKEN_URL = 'https://open.spotify.com/api/token'
 SERVER_TIME_URL = 'https://open.spotify.com/server-time'
@@ -36,8 +37,10 @@ class SpotifyClient:
     def login(self):
         """Authenticate with Spotify using sp_dc token and TOTP."""
         try:
-            server_time_response = self.session.get(SERVER_TIME_URL)
-            server_time = int(server_time_response.json()["serverTime"] * 1000)
+            server_time_response = self.session.get(SERVER_TIME_URL, timeout=10)
+            server_time_response.raise_for_status()
+            server_time_data = server_time_response.json()
+            server_time = int(server_time_data["serverTime"] * 1000)
             
             # Generate TOTP
             # Note: The original code used a custom TOTP class from syrics.totp
@@ -58,12 +61,24 @@ class SpotifyClient:
             raise Exception(f"Error generating TOTP: {e}")
         
         try:
-            req = self.session.get(TOKEN_URL, params=params)
-            token = req.json()
-            self.token = token['accessToken']
+            req = self.session.get(TOKEN_URL, params=params, timeout=10)
+            req.raise_for_status()
+            
+            # Check if response is valid JSON
+            try:
+                token_data = req.json()
+            except:
+                raise Exception(f"Invalid JSON response from Spotify: {req.text[:200]}")
+            
+            if 'accessToken' not in token_data:
+                raise Exception(f"Missing accessToken in response: {token_data}")
+            
+            self.token = token_data['accessToken']
             self.session.headers['authorization'] = f"Bearer {self.token}"
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"Network error during Spotify authentication: {e}")
         except Exception as e:
-            raise Exception(f"sp_dc provided is invalid, please check it again: {e}")
+            raise Exception(f"sp_dc provided is invalid or authentication failed: {e}")
 
     def id_to_gid(self, base62_str: str) -> str:
         """Convert base62 string (Spotify track ID) to hex GID (UUID)."""
