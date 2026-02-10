@@ -32,7 +32,13 @@ class SpotifyClient:
         self.session.cookies.set('sp_dc', dc_token)
         self.session.headers.update(HEADERS)
         self.token = None
-        self.login()
+        # Try to login, but don't fail if it doesn't work
+        # We might be able to use sp_dc cookie directly
+        try:
+            self.login()
+        except Exception as e:
+            print(f"WARNING: Could not get access token: {e}")
+            print("Will attempt to use sp_dc cookie directly for API calls")
 
     def login(self):
         """Authenticate with Spotify using sp_dc token and TOTP."""
@@ -134,11 +140,18 @@ class SpotifyClient:
     def get_track_metadata(self, gid: str) -> dict:
         """Get track metadata from Spotify using GID."""
         url = f'https://spclient.wg.spotify.com/metadata/4/track/{gid}?market=from_token'
+        
+        # If we have a token, use it; otherwise try with just the cookie
         res = self.session.get(url)
+        
         if res.status_code == 200:
             return res.json()
+        elif res.status_code == 401:
+            # Token might be expired or invalid, try refreshing
+            print("DEBUG: Got 401, token might be invalid. Response:", res.text[:200])
+            raise Exception(f"Authentication failed: {res.status_code} - {res.text[:200]}")
         else:
-            raise Exception(f"Failed to fetch track metadata: {res.status_code}")
+            raise Exception(f"Failed to fetch track metadata: {res.status_code} - {res.text[:200]}")
 
     def extract_track_id_from_url(self, spotify_url: str) -> str:
         """Extract base62 track ID from Spotify URL."""
