@@ -45,10 +45,19 @@ class SpotifyClient:
     def refresh_auth(self):
         """Refresh authentication token."""
         try:
+            # Ensure sp_dc cookie is still set (it might have been cleared)
+            if not self.session.cookies.get('sp_dc'):
+                print("DEBUG: sp_dc cookie missing, re-setting it...")
+                self.session.cookies.set('sp_dc', self.dc_token)
+            
             self.login()
             print("DEBUG: Successfully refreshed authentication token")
+            print(f"DEBUG: Token set: {bool(self.token)}")
+            print(f"DEBUG: Authorization header: {self.session.headers.get('authorization', 'NOT SET')[:50]}...")
+            print(f"DEBUG: sp_dc cookie present: {bool(self.session.cookies.get('sp_dc')))}")
         except Exception as e:
             print(f"WARNING: Failed to refresh token: {e}")
+            raise  # Re-raise so caller knows refresh failed
 
     def login(self):
         """Authenticate with Spotify using sp_dc token and TOTP."""
@@ -153,16 +162,27 @@ class SpotifyClient:
         """Get track metadata from Spotify using GID."""
         url = f'https://spclient.wg.spotify.com/metadata/4/track/{gid}?market=from_token'
         
-        # Check if token is expired or about to expire (within 5 minutes)
+        # Check if token is expired or about to expire (within 15 minutes, or already expired)
         if self.token and self.token_expires_at:
             current_time_ms = int(time.time() * 1000)
             time_until_expiry = (self.token_expires_at - current_time_ms) / 1000 / 60  # minutes
-            if time_until_expiry < 5:
+            if time_until_expiry < 15:  # Refresh if expires within 15 minutes or already expired
                 print(f"DEBUG: Token expires in {time_until_expiry:.1f} minutes, refreshing proactively...")
                 try:
                     self.refresh_auth()
+                    # Small delay after refresh to ensure it's propagated
+                    time.sleep(0.5)
                 except Exception as e:
                     print(f"DEBUG: Proactive refresh failed: {e}")
+                    # If proactive refresh fails, we'll try again on 401
+        elif not self.token:
+            # No token at all, try to get one
+            print("DEBUG: No token available, attempting to authenticate...")
+            try:
+                self.refresh_auth()
+                time.sleep(0.5)
+            except Exception as e:
+                print(f"DEBUG: Initial authentication failed: {e}")
         
         for attempt in range(retry_count):
             try:
@@ -177,28 +197,47 @@ class SpotifyClient:
                     try:
                         # Try to refresh authentication
                         self.refresh_auth()
-                        # Small delay to ensure token is propagated
-                        time.sleep(0.5)
+                        # Small delay to ensure token is propagated and session is ready
+                        time.sleep(1.0)
                         # Verify token was set
                         if not self.token:
                             raise Exception("Token refresh failed - no token set")
                         print(f"DEBUG: Token refreshed, retrying request with new token...")
+                        # Verify everything is set before retrying
+                        if not self.token:
+                            raise Exception("Token refresh failed - no token set after refresh")
+                        if not self.session.cookies.get('sp_dc'):
+                            print("DEBUG: sp_dc cookie missing, re-setting...")
+                            self.session.cookies.set('sp_dc', self.dc_token)
+                        
+                        sp_dc_value = self.session.cookies.get('sp_dc')
+                        print(f"DEBUG: sp_dc cookie present: {bool(sp_dc_value)}, length: {len(sp_dc_value) if sp_dc_value else 0}")
+                        
                         # Retry the request with new token
+                        print(f"DEBUG: Retrying with fresh token and cookie...")
+                        # Don't pass headers separately - session already has them updated
                         res = self.session.get(url, timeout=15)
                         if res.status_code == 200:
                             print(f"DEBUG: Successfully fetched metadata after token refresh")
                             return res.json()
                         elif res.status_code == 401:
-                            # Still 401 after refresh - might be sp_dc cookie issue or token not properly set
+                            # Still 401 after refresh - log detailed info
                             print(f"DEBUG: Still getting 401 after token refresh")
+                            print(f"DEBUG: Response status: {res.status_code}")
+                            print(f"DEBUG: Response headers: {dict(res.headers)}")
+                            print(f"DEBUG: Response text: {res.text[:500]}")
                             print(f"DEBUG: Current token present: {bool(self.token)}")
                             print(f"DEBUG: Authorization header: {self.session.headers.get('authorization', 'NOT SET')[:50]}...")
+                            sp_dc_cookie = self.session.cookies.get('sp_dc')
+                            print(f"DEBUG: sp_dc cookie present: {bool(sp_dc_cookie)}, length: {len(sp_dc_cookie) if sp_dc_cookie else 0}")
+                            print(f"DEBUG: Request URL: {url}")
+                            print(f"DEBUG: Request headers sent: {dict(self.session.headers)}")
                             # Continue to next retry attempt instead of immediately failing
                             if attempt < retry_count - 1:
                                 print(f"DEBUG: Will retry again (attempt {attempt + 2}/{retry_count})")
                                 continue
                             else:
-                                raise Exception(f"Authentication failed: 401 Unauthorized after {retry_count} attempts. Token refresh succeeded but metadata API still returns 401. This may indicate the sp_dc cookie has expired.")
+                                raise Exception(f"Authentication failed: 401 Unauthorized after {retry_count} attempts. Token refresh succeeded but metadata API still returns 401. Check Railway logs for details.")
                     except Exception as e:
                         error_msg = str(e)
                         # If it's our custom exception, re-raise it
