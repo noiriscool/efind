@@ -32,6 +32,7 @@ class SpotifyClient:
         self.session.cookies.set('sp_dc', dc_token)
         self.session.headers.update(HEADERS)
         self.token = None
+        self.dc_token = dc_token
         # Try to login, but don't fail if it doesn't work
         # We might be able to use sp_dc cookie directly
         try:
@@ -39,6 +40,14 @@ class SpotifyClient:
         except Exception as e:
             print(f"WARNING: Could not get access token: {e}")
             print("Will attempt to use sp_dc cookie directly for API calls")
+    
+    def refresh_auth(self):
+        """Refresh authentication token."""
+        try:
+            self.login()
+            print("DEBUG: Successfully refreshed authentication token")
+        except Exception as e:
+            print(f"WARNING: Failed to refresh token: {e}")
 
     def login(self):
         """Authenticate with Spotify using sp_dc token and TOTP."""
@@ -135,21 +144,59 @@ class SpotifyClient:
         hex_value = hex(decimal_value)[2:].zfill(32)
         return hex_value
 
-    def get_track_metadata(self, gid: str) -> dict:
+    def get_track_metadata(self, gid: str, retry_count: int = 3) -> dict:
         """Get track metadata from Spotify using GID."""
         url = f'https://spclient.wg.spotify.com/metadata/4/track/{gid}?market=from_token'
         
-        # If we have a token, use it; otherwise try with just the cookie
-        res = self.session.get(url)
+        for attempt in range(retry_count):
+            try:
+                # Add timeout and retry logic
+                res = self.session.get(url, timeout=15)
+                
+                if res.status_code == 200:
+                    return res.json()
+                elif res.status_code == 401:
+                    # Token might be expired, try to refresh
+                    print(f"DEBUG: Got 401 on attempt {attempt + 1}, trying to refresh token...")
+                    try:
+                        # Try to refresh authentication
+                        self.refresh_auth()
+                        # Retry the request with new token
+                        res = self.session.get(url, timeout=15)
+                        if res.status_code == 200:
+                            return res.json()
+                        elif res.status_code == 401:
+                            # Still 401 after refresh - sp_dc might be expired
+                            print("DEBUG: Still getting 401 after token refresh - sp_dc cookie may be expired")
+                    except Exception as e:
+                        print(f"DEBUG: Failed to refresh token: {e}")
+                    
+                    if attempt == retry_count - 1:
+                        raise Exception(f"Authentication failed: 401 Unauthorized. Your sp_dc cookie may have expired. Please get a fresh one from Spotify web player.")
+                elif res.status_code == 429:
+                    # Rate limited
+                    wait_time = 2 ** attempt  # Exponential backoff
+                    print(f"DEBUG: Rate limited, waiting {wait_time} seconds...")
+                    import time
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    if attempt == retry_count - 1:
+                        raise Exception(f"Failed to fetch track metadata: {res.status_code} - {res.text[:200]}")
+            except requests.exceptions.ConnectionError as e:
+                if attempt == retry_count - 1:
+                    raise Exception(f"Connection error after {retry_count} attempts: {e}")
+                print(f"DEBUG: Connection error on attempt {attempt + 1}, retrying...")
+                import time
+                time.sleep(1)
+            except requests.exceptions.Timeout as e:
+                if attempt == retry_count - 1:
+                    raise Exception(f"Request timed out after {retry_count} attempts: {e}")
+                print(f"DEBUG: Timeout on attempt {attempt + 1}, retrying...")
+                import time
+                time.sleep(1)
         
-        if res.status_code == 200:
-            return res.json()
-        elif res.status_code == 401:
-            # Token might be expired or invalid, try refreshing
-            print("DEBUG: Got 401, token might be invalid. Response:", res.text[:200])
-            raise Exception(f"Authentication failed: {res.status_code} - {res.text[:200]}")
-        else:
-            raise Exception(f"Failed to fetch track metadata: {res.status_code} - {res.text[:200]}")
+        raise Exception("Failed to fetch track metadata after all retries")
 
     def extract_track_id_from_url(self, spotify_url: str) -> str:
         """Extract base62 track ID from Spotify URL."""
