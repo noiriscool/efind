@@ -48,9 +48,17 @@ class SpotifyClient:
             server_time_response.raise_for_status()
             server_time_data = server_time_response.json()
             
+            # Debug: log the server time response
+            print(f"DEBUG: Server time response: {server_time_data}")
+            
             # Handle different response formats
             if "serverTime" in server_time_data:
-                server_time = int(server_time_data["serverTime"] * 1000)
+                # Check if it's already in milliseconds or seconds
+                server_time_raw = server_time_data["serverTime"]
+                if server_time_raw > 1e12:  # Already in milliseconds
+                    server_time = int(server_time_raw)
+                else:  # In seconds, convert to milliseconds
+                    server_time = int(server_time_raw * 1000)
             elif "timestamp" in server_time_data:
                 server_time = int(server_time_data["timestamp"] * 1000)
             else:
@@ -58,31 +66,45 @@ class SpotifyClient:
                 server_time = int(time.time() * 1000)
                 print("WARNING: Using local time as fallback for server time")
             
+            print(f"DEBUG: Using server_time: {server_time}")
+            
             # Generate TOTP
             # Note: The original code used a custom TOTP class from syrics.totp
-            # This implementation uses pyotp - you may need to adjust the secret or implementation
-            # If authentication fails, check if the TOTP secret/algorithm needs to be different
-            totp_secret = "JBSWY3DPEHPK3PXP"  # Default secret - may need adjustment
-            totp = pyotp.TOTP(totp_secret)
-            totp_value = totp.now()
+            # Spotify might not actually need TOTP - try without it first
+            # If that fails, we'll need to implement the custom TOTP
             
+            # Try authentication WITHOUT TOTP first (some implementations don't need it)
             params = {
                 "reason": "init",
                 "productType": "web-player",
-                "totp": totp_value,
-                "totpVer": "1",
                 "ts": str(server_time),
             }
+            
+            # Only add TOTP if we have a valid secret (for now, skip it)
+            # totp_secret = "JBSWY3DPEHPK3PXP"  # Default secret - may need adjustment
+            # totp = pyotp.TOTP(totp_secret)
+            # totp_value = totp.now()
+            # params["totp"] = totp_value
+            # params["totpVer"] = "1"
+            
+            print(f"DEBUG: Auth params: {params}")
         except Exception as e:
             raise Exception(f"Error generating TOTP: {e}")
         
         try:
             req = self.session.get(TOKEN_URL, params=params, timeout=10)
+            
+            # Debug: log the response
+            print(f"DEBUG: Token request status: {req.status_code}")
+            if req.status_code != 200:
+                print(f"DEBUG: Token request error response: {req.text[:500]}")
+            
             req.raise_for_status()
             
             # Check if response is valid JSON
             try:
                 token_data = req.json()
+                print(f"DEBUG: Token response keys: {list(token_data.keys())}")
             except:
                 raise Exception(f"Invalid JSON response from Spotify: {req.text[:200]}")
             
@@ -91,6 +113,7 @@ class SpotifyClient:
             
             self.token = token_data['accessToken']
             self.session.headers['authorization'] = f"Bearer {self.token}"
+            print("DEBUG: Successfully authenticated with Spotify!")
         except requests.exceptions.RequestException as e:
             raise Exception(f"Network error during Spotify authentication: {e}")
         except Exception as e:
