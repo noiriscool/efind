@@ -166,13 +166,18 @@ class SpotifyClient:
                         if res.status_code == 200:
                             return res.json()
                         elif res.status_code == 401:
-                            # Still 401 after refresh - sp_dc might be expired
-                            print("DEBUG: Still getting 401 after token refresh - sp_dc cookie may be expired")
+                            # Still 401 after refresh - sp_dc cookie is likely expired
+                            print("DEBUG: Still getting 401 after token refresh - sp_dc cookie is expired")
+                            print("DEBUG: The metadata API requires a valid sp_dc cookie, not just the access token")
+                            # Don't continue retrying if cookie is expired
+                            raise Exception(f"Authentication failed: 401 Unauthorized. Your sp_dc cookie has expired. Please get a fresh one from Spotify web player (open.spotify.com → DevTools → Cookies → sp_dc)")
                     except Exception as e:
                         print(f"DEBUG: Failed to refresh token: {e}")
+                        # If refresh failed, don't retry
+                        raise
                     
                     if attempt == retry_count - 1:
-                        raise Exception(f"Authentication failed: 401 Unauthorized. Your sp_dc cookie may have expired. Please get a fresh one from Spotify web player.")
+                        raise Exception(f"Authentication failed: 401 Unauthorized after {retry_count} attempts. Your sp_dc cookie may have expired. Please get a fresh one from Spotify web player.")
                 elif res.status_code == 429:
                     # Rate limited
                     wait_time = 2 ** attempt  # Exponential backoff
