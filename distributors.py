@@ -47,7 +47,7 @@ DISTRIBUTOR_MAP = {
     "1564813dc9d246388befd3f3c50e4909": "Random Sounds",
     "75ce59b02e8f439bb9e0fc2d493c9994": "Daredo",
     "d3378295da4d4180bf1ba7b745f7c7ae": "emuze",
-    "3f1980e65bb740b89118d2c5806d3c7d", "OneRPM",
+    "3f1980e65bb740b89118d2c5806d3c7d": "OneRPM",
     "67714a8c229042c68617dc5e3f52f616": "SoundOn",
     "58a1eb2962f14be29d203dd036cc2484": "Revelator",
     "2f1eee71461f4a8da1b33aa5014d2456": "Zojak World Wide",
