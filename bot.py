@@ -102,40 +102,26 @@ async def get_distributor_command(ctx, spotify_link: str = None):
             
             # Try different possible fields in the response
             if isinstance(metadata, dict):
-                # Check for direct GID field (might be nested)
-                if 'gid' in metadata:
-                    track_uuid = metadata['gid']
-                    print(f"DEBUG: Found gid in root: {track_uuid}")
-                # Check for nested track structure
-                elif 'track' in metadata and isinstance(metadata['track'], dict):
-                    track_data = metadata['track']
-                    print(f"DEBUG: Track data keys: {list(track_data.keys())}")
-                    if 'gid' in track_data:
-                        track_uuid = track_data['gid']
-                        print(f"DEBUG: Found gid in track: {track_uuid}")
-                    # Check for other UUID fields
-                    elif 'uri' in track_data:
-                        uri = track_data['uri']
-                        print(f"DEBUG: Found URI: {uri}")
-                    # Check for album or other nested structures that might have the UUID
-                    if 'album' in track_data and isinstance(track_data['album'], dict):
-                        album_data = track_data['album']
-                        print(f"DEBUG: Album data keys: {list(album_data.keys())}")
-                        if 'gid' in album_data:
-                            # Album GID might be what we need
-                            print(f"DEBUG: Found album gid: {album_data['gid']}")
-                # Check for URI and extract UUID
-                elif 'uri' in metadata:
-                    uri = metadata['uri']
-                    if 'spotify:track:' in uri:
-                        # Extract and convert if needed
-                        print(f"DEBUG: Found URI in root: {uri}")
+                # The distributor UUID is in album.licensor.uuid
+                if 'album' in metadata and isinstance(metadata['album'], dict):
+                    album_data = metadata['album']
+                    if 'licensor' in album_data and isinstance(album_data['licensor'], dict):
+                        if 'uuid' in album_data['licensor']:
+                            track_uuid = album_data['licensor']['uuid']
+                            print(f"DEBUG: Found distributor UUID in album.licensor.uuid: {track_uuid}")
+                        else:
+                            print(f"DEBUG: album.licensor exists but no uuid field. Keys: {list(album_data['licensor'].keys())}")
+                    else:
+                        print(f"DEBUG: album exists but no licensor field. Album keys: {list(album_data.keys())}")
+                else:
+                    print(f"DEBUG: No album field in metadata. Top-level keys: {list(metadata.keys())}")
                 
-                # If still no UUID found, log the full structure
+                # Fallback: if we still don't have the UUID, log for debugging
                 if not track_uuid:
-                    print(f"DEBUG: Could not find UUID in metadata. Full structure:")
-                    import json
-                    print(json.dumps(metadata, indent=2)[:2000])
+                    print(f"DEBUG: Could not find distributor UUID. Checking alternative fields...")
+                    # Try other possible locations as fallback
+                    if 'gid' in metadata:
+                        print(f"DEBUG: Found track gid (not distributor UUID): {metadata['gid']}")
             
             # Get distributor
             if track_uuid:
