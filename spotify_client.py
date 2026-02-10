@@ -3,7 +3,7 @@ import pyotp
 import time
 
 TOKEN_URL = 'https://open.spotify.com/api/token'
-SERVER_TIME_URL = 'https://open.spotify.com/server-time'
+SERVER_TIME_URL = 'https://open.spotify.com/api/server-time'  # Fixed: was /server-time, should be /api/server-time
 SPOTIFY_HOME_PAGE_URL = "https://open.spotify.com/"
 CLIENT_VERSION = "1.2.46.25.g7f189073"
 
@@ -37,10 +37,26 @@ class SpotifyClient:
     def login(self):
         """Authenticate with Spotify using sp_dc token and TOTP."""
         try:
+            # Try to get server time from Spotify
             server_time_response = self.session.get(SERVER_TIME_URL, timeout=10)
+            
+            # If 404, try alternative endpoint
+            if server_time_response.status_code == 404:
+                alt_url = 'https://open.spotify.com/server-time'
+                server_time_response = self.session.get(alt_url, timeout=10)
+            
             server_time_response.raise_for_status()
             server_time_data = server_time_response.json()
-            server_time = int(server_time_data["serverTime"] * 1000)
+            
+            # Handle different response formats
+            if "serverTime" in server_time_data:
+                server_time = int(server_time_data["serverTime"] * 1000)
+            elif "timestamp" in server_time_data:
+                server_time = int(server_time_data["timestamp"] * 1000)
+            else:
+                # Fallback to current time if server time not available
+                server_time = int(time.time() * 1000)
+                print("WARNING: Using local time as fallback for server time")
             
             # Generate TOTP
             # Note: The original code used a custom TOTP class from syrics.totp
