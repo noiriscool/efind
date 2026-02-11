@@ -54,8 +54,9 @@ class SpotifyClient:
                 time.sleep(7 * 60)  # Sleep for 7 minutes
                 if not self._stop_refresh:
                     try:
-                        print("DEBUG: Background refresh loop - refreshing session...")
-                        self.refresh_auth()
+                        print("DEBUG: Background refresh loop - creating new session...")
+                        self._new_session()
+                        print("DEBUG: Background refresh successful")
                     except Exception as e:
                         print(f"DEBUG: Background refresh failed: {e}")
         
@@ -63,21 +64,27 @@ class SpotifyClient:
         self._refresh_thread.start()
         print("DEBUG: Started background refresh loop (every 7 minutes)")
     
+    def _new_session(self):
+        """Create a completely new session - this is what fixes the expired token issue."""
+        # Create a fresh session
+        self.session = requests.Session()
+        self.session.cookies.set('sp_dc', self.dc_token)
+        self.session.headers.update(HEADERS)
+        # Login to get new token
+        self.login()
+    
     def refresh_auth(self):
-        """Refresh authentication token."""
+        """Refresh authentication by creating a new session."""
         try:
-            # Ensure sp_dc cookie is still set (it might have been cleared)
-            if not self.session.cookies.get('sp_dc'):
-                print("DEBUG: sp_dc cookie missing, re-setting it...")
-                self.session.cookies.set('sp_dc', self.dc_token)
-            
-            self.login()
-            print("DEBUG: Successfully refreshed authentication token")
+            # Create a completely new session instead of just refreshing token
+            # This is what your friend's code does - _new_session()
+            self._new_session()
+            print("DEBUG: Successfully created new session")
             print(f"DEBUG: Token set: {bool(self.token)}")
             print(f"DEBUG: Authorization header: {self.session.headers.get('authorization', 'NOT SET')[:50]}...")
             print(f"DEBUG: sp_dc cookie present: {bool(self.session.cookies.get('sp_dc'))}")
         except Exception as e:
-            print(f"WARNING: Failed to refresh token: {e}")
+            print(f"WARNING: Failed to create new session: {e}")
             raise  # Re-raise so caller knows refresh failed
 
     def login(self):
@@ -218,8 +225,8 @@ class SpotifyClient:
                     try:
                         # Try to refresh authentication
                         self.refresh_auth()
-                        # Small delay to ensure token is propagated and session is ready
-                        time.sleep(1.0)
+                        # Small delay to ensure new session is ready
+                        time.sleep(0.5)
                         # Verify token was set
                         if not self.token:
                             raise Exception("Token refresh failed - no token set")
