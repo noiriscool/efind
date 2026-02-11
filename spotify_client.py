@@ -1,5 +1,6 @@
 import requests
 import time
+import threading
 from totp import TOTP, TOTPGenerationException
 
 TOKEN_URL = 'https://open.spotify.com/api/token'
@@ -34,13 +35,33 @@ class SpotifyClient:
         self.token = None
         self.token_expires_at = None
         self.dc_token = dc_token
+        self._refresh_thread = None
+        self._stop_refresh = False
         # Try to login, but don't fail if it doesn't work
         # We might be able to use sp_dc cookie directly
         try:
             self.login()
+            # Start background refresh loop (refresh every 7 minutes)
+            self._start_refresh_loop()
         except Exception as e:
             print(f"WARNING: Could not get access token: {e}")
             print("Will attempt to use sp_dc cookie directly for API calls")
+    
+    def _start_refresh_loop(self):
+        """Start a background thread that refreshes the session every 7 minutes."""
+        def loop():
+            while not self._stop_refresh:
+                time.sleep(7 * 60)  # Sleep for 7 minutes
+                if not self._stop_refresh:
+                    try:
+                        print("DEBUG: Background refresh loop - refreshing session...")
+                        self.refresh_auth()
+                    except Exception as e:
+                        print(f"DEBUG: Background refresh failed: {e}")
+        
+        self._refresh_thread = threading.Thread(target=loop, daemon=True)
+        self._refresh_thread.start()
+        print("DEBUG: Started background refresh loop (every 7 minutes)")
     
     def refresh_auth(self):
         """Refresh authentication token."""
