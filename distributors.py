@@ -109,9 +109,13 @@ DISTRIBUTOR_MAP = {
     "f592bd9a6c354905a5893877a96a65b2": "TunePartner",
     "58da0e613b804f5d8b567acf49265de4": "HIGHVIBES",
     "f00b045c5a4c44408dd4b329387bea42": "EmuBands",
-    ""
-
-
+    "15d2a9e7efb64f2fa092cf993740e43f": "KeyZit",
+    "82426856604c43119f24d75a3763616b": "PIAS",
+     # check PIAS.. ??
+    "388baa555ac649cf936c7a732cee4821": "IDOL",
+    "90b881b00b9f4531876fd6817a1d7ef2": "Entertainment One",
+    # check entertainment one.. ??
+    "705d9e39beaa4982a432f4bfe0e9b213": "MusicAdders",
 }
 
 def get_distributor(uuid: str) -> str:
