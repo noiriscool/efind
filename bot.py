@@ -118,11 +118,28 @@ async def get_distributor_command(ctx, spotify_link: str = None):
                 if upc_matches:
                     upc = upc_matches[0]
                 
-                # Get track count
-                track_count = album_metadata.get('tracks', {}).get('total', 0) if isinstance(album_metadata.get('tracks'), dict) else 0
+                # Get track count - check multiple possible locations
+                track_count = 0
+                if 'tracks' in album_metadata:
+                    tracks_data = album_metadata['tracks']
+                    if isinstance(tracks_data, dict):
+                        track_count = tracks_data.get('total', 0) or tracks_data.get('count', 0)
+                    elif isinstance(tracks_data, list):
+                        track_count = len(tracks_data)
+                
+                # Try alternative field names if still 0
                 if not track_count:
-                    # Try alternative field names
-                    track_count = album_metadata.get('total_tracks', 0) or album_metadata.get('num_tracks', 0)
+                    track_count = album_metadata.get('total_tracks', 0) or album_metadata.get('num_tracks', 0) or album_metadata.get('track_count', 0)
+                
+                # Get album type (EP vs Album)
+                album_type = album_metadata.get('type', 'Album').capitalize()
+                # Sometimes it might be in album_group or other fields
+                if album_type == 'Album' and 'album_group' in album_metadata:
+                    album_group = album_metadata.get('album_group', '').capitalize()
+                    if album_group:
+                        album_type = album_group
+                
+                print(f"DEBUG: Track count: {track_count}, Album type: {album_type}")
                 
                 # Get distributor
                 distributor = 'Not Found'
@@ -146,6 +163,7 @@ async def get_distributor_command(ctx, spotify_link: str = None):
                     color=0x1DB954  # Spotify green
                 )
                 
+                embed.add_field(name="Type", value=album_type, inline=True)
                 embed.add_field(name="Label", value=label, inline=True)
                 embed.add_field(name="UPC", value=upc, inline=True)
                 embed.add_field(name="Tracks", value=str(track_count) if track_count else "Unknown", inline=True)
