@@ -389,11 +389,35 @@ class SpotifyClient:
             # URI format
             track_id = spotify_url.replace('spotify:track:', '')
         else:
-            raise ValueError("Invalid Spotify URL format")
+            raise ValueError("Invalid Spotify track URL format")
         
         # Validate track ID (should be base62 characters)
         if not track_id or not all(c.isalnum() for c in track_id):
             raise ValueError(f"Invalid track ID format: {track_id}")
         
         return track_id
+    
+    def extract_album_id_from_url(self, spotify_url: str) -> str:
+        """Extract base62 album ID from Spotify URL."""
+        # Handle various Spotify album URL formats:
+        # https://open.spotify.com/album/4iV5W9uYEdYUVa79Axb7Rh
+        # https://open.spotify.com/intl-it/album/4iV5W9uYEdYUVa79Axb7Rh (international)
+        # https://spotify.com/album/4iV5W9uYEdYUVa79Axb7Rh
+        # spotify:album:4iV5W9uYEdYUVa79Axb7Rh
+        
+        # Handle international URLs with /intl-XX/ path
+        if '/intl-' in spotify_url and '/album/' in spotify_url:
+            album_id = spotify_url.split('/album/')[-1].split('?')[0]
+        elif 'spotify.com/album/' in spotify_url:
+            album_id = spotify_url.split('album/')[-1].split('?')[0]
+        elif spotify_url.startswith('spotify:album:'):
+            album_id = spotify_url.replace('spotify:album:', '')
+        else:
+            raise ValueError("Invalid Spotify album URL format")
+        
+        # Validate album ID (should be base62 characters)
+        if not album_id or not all(c.isalnum() for c in album_id):
+            raise ValueError(f"Invalid album ID format: {album_id}")
+        
+        return album_id
 

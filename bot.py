@@ -83,7 +83,78 @@ async def get_distributor_command(ctx, spotify_link: str = None):
     try:
         # Show typing indicator
         async with ctx.typing():
-            # Extract track ID from URL
+            # Detect if this is an album or track link
+            is_album = '/album/' in spotify_link or spotify_link.startswith('spotify:album:')
+            
+            if is_album:
+                # Handle album link
+                album_id = spotify_client.extract_album_id_from_url(spotify_link)
+                album_gid = spotify_client.id_to_gid(album_id)
+                
+                # Get album metadata
+                album_metadata = spotify_client.get_album_metadata(album_gid)
+                
+                # Get distributor UUID from album
+                track_uuid = None
+                if isinstance(album_metadata, dict):
+                    if 'licensor' in album_metadata and isinstance(album_metadata['licensor'], dict):
+                        if 'uuid' in album_metadata['licensor']:
+                            track_uuid = album_metadata['licensor']['uuid']
+                            print(f"DEBUG: Found distributor UUID in album.licensor.uuid: {track_uuid}")
+                
+                # Extract album information
+                album_name = album_metadata.get('name', 'Unknown')
+                artists = album_metadata.get('artist', [])
+                artist_names = ', '.join([a.get('name', '') for a in artists if isinstance(a, dict) and a.get('name')])
+                if not artist_names:
+                    artist_names = 'Unknown'
+                label = album_metadata.get('label', 'Not Found')
+                
+                # Get UPC from album metadata
+                upc = 'Not Found'
+                import re
+                album_str = str(album_metadata)
+                upc_matches = re.findall(r'\b\d{12}\b', album_str)
+                if upc_matches:
+                    upc = upc_matches[0]
+                
+                # Get track count
+                track_count = album_metadata.get('tracks', {}).get('total', 0) if isinstance(album_metadata.get('tracks'), dict) else 0
+                if not track_count:
+                    # Try alternative field names
+                    track_count = album_metadata.get('total_tracks', 0) or album_metadata.get('num_tracks', 0)
+                
+                # Get distributor
+                distributor = 'Not Found'
+                if track_uuid:
+                    distributor = get_distributor(track_uuid) or 'Not Found'
+                    
+                    # Log unknown UUIDs to private channel
+                    if distributor == 'Not Found':
+                        log_channel_id = 1473480422695633057
+                        try:
+                            log_channel = bot.get_channel(log_channel_id)
+                            if log_channel:
+                                await log_channel.send(f"An unknown UUID was found: `{track_uuid}`\nLink: {spotify_link}")
+                        except Exception as e:
+                            print(f"DEBUG: Failed to log unknown UUID: {e}")
+                
+                # Create embed for album
+                embed = discord.Embed(
+                    title=album_name,
+                    description=f"by **{artist_names}**" if artist_names != 'Unknown' else "",
+                    color=0x1DB954  # Spotify green
+                )
+                
+                embed.add_field(name="Label", value=label, inline=True)
+                embed.add_field(name="UPC", value=upc, inline=True)
+                embed.add_field(name="Tracks", value=str(track_count) if track_count else "Unknown", inline=True)
+                embed.add_field(name="Distributor", value=distributor, inline=False)
+                
+                await ctx.send(embed=embed)
+                return
+            
+            # Handle track link (existing code)
             track_id = spotify_client.extract_track_id_from_url(spotify_link)
             
             # Convert to GID
@@ -242,15 +313,27 @@ def extract_spotify_link(text: str) -> str:
     """Extract Spotify link from text."""
     import re
     
-    # Pattern for Spotify URLs
-    url_pattern = r'https?://(?:open\.)?spotify\.com/track/[a-zA-Z0-9]+'
-    match = re.search(url_pattern, text)
+    # Pattern for Spotify track URLs
+    track_url_pattern = r'https?://(?:open\.)?spotify\.com(?:/intl-[^/]+)?/track/[a-zA-Z0-9]+'
+    match = re.search(track_url_pattern, text)
     if match:
         return match.group(0)
     
-    # Pattern for Spotify URI
-    uri_pattern = r'spotify:track:[a-zA-Z0-9]+'
-    match = re.search(uri_pattern, text)
+    # Pattern for Spotify album URLs
+    album_url_pattern = r'https?://(?:open\.)?spotify\.com(?:/intl-[^/]+)?/album/[a-zA-Z0-9]+'
+    match = re.search(album_url_pattern, text)
+    if match:
+        return match.group(0)
+    
+    # Pattern for Spotify track URI
+    track_uri_pattern = r'spotify:track:[a-zA-Z0-9]+'
+    match = re.search(track_uri_pattern, text)
+    if match:
+        return match.group(0)
+    
+    # Pattern for Spotify album URI
+    album_uri_pattern = r'spotify:album:[a-zA-Z0-9]+'
+    match = re.search(album_uri_pattern, text)
     if match:
         return match.group(0)
     
