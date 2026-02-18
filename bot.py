@@ -118,6 +118,26 @@ async def get_distributor_command(ctx, spotify_link: str = None):
                 if upc_matches:
                     upc = upc_matches[0]
                 
+                # Get album cover image URL
+                cover_image_url = None
+                if 'cover_group' in album_metadata:
+                    cover_group = album_metadata['cover_group']
+                    if isinstance(cover_group, dict) and 'image' in cover_group:
+                        images = cover_group['image']
+                        if isinstance(images, list) and len(images) > 0:
+                            # Get the largest image (usually last in list or LARGE size)
+                            # Try to find LARGE size first, fallback to any image
+                            for img in images:
+                                if isinstance(img, dict) and img.get('file_id'):
+                                    if img.get('size') == 'LARGE' or not cover_image_url:
+                                        cover_image_url = f"https://i.scdn.co/image/{img['file_id']}"
+                            # If no LARGE found, use first image
+                            if not cover_image_url and images[0].get('file_id'):
+                                cover_image_url = f"https://i.scdn.co/image/{images[0]['file_id']}"
+                        elif isinstance(images, dict) and images.get('file_id'):
+                            cover_image_url = f"https://i.scdn.co/image/{images['file_id']}"
+                print(f"DEBUG: Cover image URL: {cover_image_url}")
+                
                 # Get track count - check multiple possible locations
                 track_count = 0
                 print(f"DEBUG: Album metadata keys: {list(album_metadata.keys()) if isinstance(album_metadata, dict) else 'Not a dict'}")
@@ -194,6 +214,10 @@ async def get_distributor_command(ctx, spotify_link: str = None):
                     color=0x1DB954  # Spotify green
                 )
                 
+                # Set thumbnail if cover image is available
+                if cover_image_url:
+                    embed.set_thumbnail(url=cover_image_url)
+                
                 embed.add_field(name="Type", value=album_type, inline=True)
                 embed.add_field(name="Label", value=label, inline=True)
                 embed.add_field(name="UPC", value=upc, inline=True)
@@ -253,6 +277,24 @@ async def get_distributor_command(ctx, spotify_link: str = None):
             album_data = metadata.get('album', {})
             album_name = album_data.get('name', 'Unknown') if isinstance(album_data, dict) else 'Unknown'
             label = album_data.get('label', 'Not Found') if isinstance(album_data, dict) else 'Not Found'
+            
+            # Get album cover image from track's album data
+            cover_image_url = None
+            if isinstance(album_data, dict) and 'cover_group' in album_data:
+                cover_group = album_data['cover_group']
+                if isinstance(cover_group, dict) and 'image' in cover_group:
+                    images = cover_group['image']
+                    if isinstance(images, list) and len(images) > 0:
+                        # Get the largest image (usually LARGE size)
+                        for img in images:
+                            if isinstance(img, dict) and img.get('file_id'):
+                                if img.get('size') == 'LARGE' or not cover_image_url:
+                                    cover_image_url = f"https://i.scdn.co/image/{img['file_id']}"
+                        # If no LARGE found, use first image
+                        if not cover_image_url and images[0].get('file_id'):
+                            cover_image_url = f"https://i.scdn.co/image/{images[0]['file_id']}"
+                    elif isinstance(images, dict) and images.get('file_id'):
+                        cover_image_url = f"https://i.scdn.co/image/{images['file_id']}"
             
             # Get ISRC from track's external_id (ISRC is track-level)
             external_id = metadata.get('external_id', {})
@@ -341,6 +383,10 @@ async def get_distributor_command(ctx, spotify_link: str = None):
                 description=f"by **{artist_names}**" if artist_names != 'Unknown' else "",
                 color=0x1DB954  # Spotify green
             )
+            
+            # Set thumbnail if cover image is available
+            if cover_image_url:
+                embed.set_thumbnail(url=cover_image_url)
             
             # Add fields
             embed.add_field(name="Album", value=album_name, inline=False)
