@@ -299,19 +299,101 @@ class SpotifyClient:
         
         raise Exception("Failed to fetch track metadata after all retries")
 
+    def get_album_metadata(self, album_gid: str, retry_count: int = 3) -> dict:
+        """Get album metadata from Spotify using album GID."""
+        url = f'https://spclient.wg.spotify.com/metadata/4/album/{album_gid}?market=from_token'
+        
+        # Check if token is expired or about to expire (within 15 minutes, or already expired)
+        if self.token and self.token_expires_at:
+            current_time_ms = int(time.time() * 1000)
+            time_until_expiry = (self.token_expires_at - current_time_ms) / 1000 / 60  # minutes
+            if time_until_expiry < 15:  # Refresh if expires within 15 minutes or already expired
+                print(f"DEBUG: Token expires in {time_until_expiry:.1f} minutes, refreshing proactively...")
+                try:
+                    self.refresh_auth()
+                    time.sleep(0.5)
+                except Exception as e:
+                    print(f"DEBUG: Proactive refresh failed: {e}")
+        elif not self.token:
+            print("DEBUG: No token available, attempting to authenticate...")
+            try:
+                self.refresh_auth()
+                time.sleep(0.5)
+            except Exception as e:
+                print(f"DEBUG: Initial authentication failed: {e}")
+        
+        for attempt in range(retry_count):
+            try:
+                res = self.session.get(url, timeout=15)
+                
+                if res.status_code == 200:
+                    album_data = res.json()
+                    # Debug: Log album metadata structure to understand UPC location
+                    print(f"DEBUG: Album metadata keys: {list(album_data.keys()) if isinstance(album_data, dict) else 'Not a dict'}")
+                    if isinstance(album_data, dict):
+                        # Log all possible UPC-related fields
+                        print(f"DEBUG: Album has 'upc': {'upc' in album_data}")
+                        print(f"DEBUG: Album has 'upc_code': {'upc_code' in album_data}")
+                        print(f"DEBUG: Album has 'barcode': {'barcode' in album_data}")
+                        print(f"DEBUG: Album has 'external_id': {'external_id' in album_data}")
+                        if 'external_id' in album_data:
+                            print(f"DEBUG: Album external_id type: {type(album_data['external_id'])}")
+                            print(f"DEBUG: Album external_id value: {album_data['external_id']}")
+                    return album_data
+                elif res.status_code == 401:
+                    print(f"DEBUG: Got 401 on album metadata, trying to refresh token...")
+                    try:
+                        self.refresh_auth()
+                        time.sleep(0.5)
+                        res = self.session.get(url, timeout=15)
+                        if res.status_code == 200:
+                            album_data = res.json()
+                            print(f"DEBUG: Album metadata keys after refresh: {list(album_data.keys()) if isinstance(album_data, dict) else 'Not a dict'}")
+                            return album_data
+                    except Exception as e:
+                        print(f"DEBUG: Failed to refresh token for album: {e}")
+                    
+                    if attempt == retry_count - 1:
+                        raise Exception(f"Authentication failed: 401 Unauthorized for album metadata")
+                else:
+                    if attempt == retry_count - 1:
+                        raise Exception(f"Failed to fetch album metadata: {res.status_code} - {res.text[:200]}")
+            except requests.exceptions.ConnectionError as e:
+                if attempt == retry_count - 1:
+                    raise Exception(f"Connection error after {retry_count} attempts: {e}")
+                time.sleep(1)
+            except requests.exceptions.Timeout as e:
+                if attempt == retry_count - 1:
+                    raise Exception(f"Request timed out after {retry_count} attempts: {e}")
+                time.sleep(1)
+        
+        raise Exception("Failed to fetch album metadata after all retries")
+
     def extract_track_id_from_url(self, spotify_url: str) -> str:
         """Extract base62 track ID from Spotify URL."""
-        # Handle various Spotify URL formats
+        # Handle various Spotify URL formats:
         # https://open.spotify.com/track/4iV5W9uYEdYUVa79Axb7Rh
+        # https://open.spotify.com/intl-it/track/4iV5W9uYEdYUVa79Axb7Rh (international)
         # https://spotify.com/track/4iV5W9uYEdYUVa79Axb7Rh
         # spotify:track:4iV5W9uYEdYUVa79Axb7Rh
         
-        if 'spotify.com/track/' in spotify_url:
+        # Handle international URLs with /intl-XX/ path
+        if '/intl-' in spotify_url and '/track/' in spotify_url:
+            # Extract track ID from international URL
+            # Format: .../intl-XX/track/TRACK_ID
+            track_id = spotify_url.split('/track/')[-1].split('?')[0]
+        elif 'spotify.com/track/' in spotify_url:
+            # Standard URL format
             track_id = spotify_url.split('track/')[-1].split('?')[0]
         elif spotify_url.startswith('spotify:track:'):
+            # URI format
             track_id = spotify_url.replace('spotify:track:', '')
         else:
             raise ValueError("Invalid Spotify URL format")
+        
+        # Validate track ID (should be base62 characters)
+        if not track_id or not all(c.isalnum() for c in track_id):
+            raise ValueError(f"Invalid track ID format: {track_id}")
         
         return track_id
 

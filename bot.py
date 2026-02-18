@@ -149,7 +149,7 @@ async def get_distributor_command(ctx, spotify_link: str = None):
                         isrc = ext_id.get('id', 'Not Found')
                         break
             
-            # Get UPC from album metadata (UPC is album-level, need to fetch album separately)
+            # Get UPC from album metadata (UPC is album-level)
             upc = 'Not Found'
             if isinstance(album_data, dict) and 'gid' in album_data:
                 # Get album GID and fetch full album metadata
@@ -158,25 +158,42 @@ async def get_distributor_command(ctx, spotify_link: str = None):
                     print(f"DEBUG: Fetching album metadata for UPC, album GID: {album_gid}")
                     album_metadata = spotify_client.get_album_metadata(album_gid)
                     
-                    # Check various possible UPC fields in album metadata
+                    # Log full album metadata structure for investigation
                     if isinstance(album_metadata, dict):
+                        print(f"DEBUG: Full album metadata structure (first 2000 chars): {str(album_metadata)[:2000]}")
+                        
+                        # Try to extract UPC - check all possible locations
+                        # Method 1: Direct fields
                         upc = album_metadata.get('upc') or album_metadata.get('upc_code') or album_metadata.get('barcode')
+                        
+                        # Method 2: Check external_id structure
                         if not upc or upc == 'Not Found':
-                            # Check external_id structure
                             album_ext_id = album_metadata.get('external_id', {})
-                            if isinstance(album_ext_id, dict) and album_ext_id.get('type') == 'upc':
-                                upc = album_ext_id.get('id', 'Not Found')
+                            if isinstance(album_ext_id, dict):
+                                if album_ext_id.get('type') == 'upc':
+                                    upc = album_ext_id.get('id', 'Not Found')
                             elif isinstance(album_ext_id, list):
                                 for ext_id in album_ext_id:
                                     if isinstance(ext_id, dict) and ext_id.get('type') == 'upc':
                                         upc = ext_id.get('id', 'Not Found')
                                         break
-                        print(f"DEBUG: Found UPC from album metadata: {upc}")
+                        
+                        # Method 3: Check if UPC is nested elsewhere
+                        if not upc or upc == 'Not Found':
+                            # Check all string values that look like UPCs (12 digits)
+                            import re
+                            album_str = str(album_metadata)
+                            upc_matches = re.findall(r'\b\d{12}\b', album_str)
+                            if upc_matches:
+                                print(f"DEBUG: Found potential UPCs in album metadata: {upc_matches}")
+                                # Use first match (usually the UPC)
+                                upc = upc_matches[0]
+                        
+                        print(f"DEBUG: Final UPC value: {upc}")
                 except Exception as e:
                     print(f"DEBUG: Failed to fetch album metadata for UPC: {e}")
-                    # Fallback: try to get UPC from track's album data if available
-                    if isinstance(album_data, dict):
-                        upc = album_data.get('upc') or album_data.get('upc_code') or album_data.get('barcode')
+                    import traceback
+                    traceback.print_exc()
             
             # Get distributor
             distributor = 'Not Found'
