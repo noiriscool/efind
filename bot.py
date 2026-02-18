@@ -122,7 +122,32 @@ async def get_distributor_command(ctx, spotify_link: str = None):
                 track_count = 0
                 print(f"DEBUG: Album metadata keys: {list(album_metadata.keys()) if isinstance(album_metadata, dict) else 'Not a dict'}")
                 
-                if 'tracks' in album_metadata:
+                # Check disc field - tracks might be nested in disc
+                if 'disc' in album_metadata:
+                    disc_data = album_metadata['disc']
+                    print(f"DEBUG: disc field type: {type(disc_data)}, value: {disc_data}")
+                    if isinstance(disc_data, list):
+                        # Count tracks across all discs
+                        for disc in disc_data:
+                            if isinstance(disc, dict) and 'track' in disc:
+                                tracks_in_disc = disc['track']
+                                if isinstance(tracks_in_disc, list):
+                                    track_count += len(tracks_in_disc)
+                                elif isinstance(tracks_in_disc, dict):
+                                    # Might have a count or items
+                                    track_count += tracks_in_disc.get('count', 0) or len(tracks_in_disc.get('items', []))
+                        print(f"DEBUG: Track count from disc field: {track_count}")
+                    elif isinstance(disc_data, dict):
+                        # Single disc
+                        if 'track' in disc_data:
+                            tracks_in_disc = disc_data['track']
+                            if isinstance(tracks_in_disc, list):
+                                track_count = len(tracks_in_disc)
+                            elif isinstance(tracks_in_disc, dict):
+                                track_count = tracks_in_disc.get('count', 0) or len(tracks_in_disc.get('items', []))
+                
+                # Check tracks field (if it exists)
+                if not track_count and 'tracks' in album_metadata:
                     tracks_data = album_metadata['tracks']
                     print(f"DEBUG: tracks field type: {type(tracks_data)}, value: {tracks_data}")
                     if isinstance(tracks_data, dict):
