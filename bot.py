@@ -134,19 +134,37 @@ async def get_distributor_command(ctx, spotify_link: str = None):
             album_name = album_data.get('name', 'Unknown') if isinstance(album_data, dict) else 'Unknown'
             label = album_data.get('label', 'Not Found') if isinstance(album_data, dict) else 'Not Found'
             
-            # Get ISRC from external_id
+            # Get ISRC from track's external_id (ISRC is track-level)
             external_id = metadata.get('external_id', {})
             isrc = 'Not Found'
             if isinstance(external_id, dict):
+                # Check if it's an ISRC
                 if external_id.get('type') == 'isrc':
                     isrc = external_id.get('id', 'Not Found')
+                # Sometimes it might be a list or different structure
+            elif isinstance(external_id, list):
+                # If it's a list, find the ISRC entry
+                for ext_id in external_id:
+                    if isinstance(ext_id, dict) and ext_id.get('type') == 'isrc':
+                        isrc = ext_id.get('id', 'Not Found')
+                        break
             
-            # Get UPC - might be in album or track level
+            # Get UPC from album (UPC is album-level, even for singles)
             upc = 'Not Found'
             if isinstance(album_data, dict):
-                upc = album_data.get('upc', 'Not Found')
-            if upc == 'Not Found':
-                upc = metadata.get('upc', 'Not Found')
+                # Check various possible UPC fields
+                upc = album_data.get('upc') or album_data.get('upc_code') or album_data.get('barcode')
+                if not upc:
+                    # Sometimes UPC might be in a nested structure
+                    if 'external_id' in album_data:
+                        album_ext_id = album_data['external_id']
+                        if isinstance(album_ext_id, dict) and album_ext_id.get('type') == 'upc':
+                            upc = album_ext_id.get('id', 'Not Found')
+                        elif isinstance(album_ext_id, list):
+                            for ext_id in album_ext_id:
+                                if isinstance(ext_id, dict) and ext_id.get('type') == 'upc':
+                                    upc = ext_id.get('id', 'Not Found')
+                                    break
             
             # Get distributor
             distributor = 'Not Found'
@@ -159,11 +177,11 @@ async def get_distributor_command(ctx, spotify_link: str = None):
             # Create embed
             embed = discord.Embed(
                 title=track_name,
+                description=f"by {artist_names}" if artist_names != 'Unknown' else "",
                 color=0x1DB954  # Spotify green
             )
             
             # Add fields
-            embed.add_field(name="Artist", value=artist_names, inline=False)
             embed.add_field(name="Album", value=album_name, inline=False)
             embed.add_field(name="Label", value=label, inline=True)
             embed.add_field(name="ISRC", value=isrc, inline=True)
