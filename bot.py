@@ -206,7 +206,7 @@ async def get_distributor_command(ctx, spotify_link: str = None):
                     try:
                         log_channel = bot.get_channel(log_channel_id)
                         if log_channel:
-                            await log_channel.send(f"An unknown UUID was found: `{track_uuid}`")
+                            await log_channel.send(f"An unknown UUID was found: `{track_uuid}`\nLink: {spotify_link}")
                         else:
                             print(f"DEBUG: Could not find log channel {log_channel_id}")
                     except Exception as e:
