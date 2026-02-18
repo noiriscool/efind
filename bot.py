@@ -120,16 +120,22 @@ async def get_distributor_command(ctx, spotify_link: str = None):
                 
                 # Get track count - check multiple possible locations
                 track_count = 0
+                print(f"DEBUG: Album metadata keys: {list(album_metadata.keys()) if isinstance(album_metadata, dict) else 'Not a dict'}")
+                
                 if 'tracks' in album_metadata:
                     tracks_data = album_metadata['tracks']
+                    print(f"DEBUG: tracks field type: {type(tracks_data)}, value: {tracks_data}")
                     if isinstance(tracks_data, dict):
-                        track_count = tracks_data.get('total', 0) or tracks_data.get('count', 0)
+                        track_count = tracks_data.get('total', 0) or tracks_data.get('count', 0) or len(tracks_data.get('items', []))
+                        print(f"DEBUG: tracks dict - total: {tracks_data.get('total')}, count: {tracks_data.get('count')}, items length: {len(tracks_data.get('items', []))}")
                     elif isinstance(tracks_data, list):
                         track_count = len(tracks_data)
+                        print(f"DEBUG: tracks is list, length: {track_count}")
                 
                 # Try alternative field names if still 0
                 if not track_count:
                     track_count = album_metadata.get('total_tracks', 0) or album_metadata.get('num_tracks', 0) or album_metadata.get('track_count', 0)
+                    print(f"DEBUG: Trying alternative fields - total_tracks: {album_metadata.get('total_tracks')}, num_tracks: {album_metadata.get('num_tracks')}, track_count: {album_metadata.get('track_count')}")
                 
                 # Get album type (EP vs Album)
                 album_type = album_metadata.get('type', 'Album').capitalize()
@@ -139,7 +145,7 @@ async def get_distributor_command(ctx, spotify_link: str = None):
                     if album_group:
                         album_type = album_group
                 
-                print(f"DEBUG: Track count: {track_count}, Album type: {album_type}")
+                print(f"DEBUG: Final track count: {track_count}, Album type: {album_type}")
                 
                 # Get distributor
                 distributor = 'Not Found'
