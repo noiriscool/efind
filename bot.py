@@ -123,21 +123,54 @@ async def get_distributor_command(ctx, spotify_link: str = None):
                     if 'gid' in metadata:
                         print(f"DEBUG: Found track gid (not distributor UUID): {metadata['gid']}")
             
+            # Extract track information for embed
+            track_name = metadata.get('name', 'Unknown')
+            artists = metadata.get('artist', [])
+            artist_names = ', '.join([a.get('name', '') for a in artists if isinstance(a, dict) and a.get('name')])
+            if not artist_names:
+                artist_names = 'Unknown'
+            
+            album_data = metadata.get('album', {})
+            album_name = album_data.get('name', 'Unknown') if isinstance(album_data, dict) else 'Unknown'
+            label = album_data.get('label', 'Not Found') if isinstance(album_data, dict) else 'Not Found'
+            
+            # Get ISRC from external_id
+            external_id = metadata.get('external_id', {})
+            isrc = 'Not Found'
+            if isinstance(external_id, dict):
+                if external_id.get('type') == 'isrc':
+                    isrc = external_id.get('id', 'Not Found')
+            
+            # Get UPC - might be in album or track level
+            upc = 'Not Found'
+            if isinstance(album_data, dict):
+                upc = album_data.get('upc', 'Not Found')
+            if upc == 'Not Found':
+                upc = metadata.get('upc', 'Not Found')
+            
             # Get distributor
+            distributor = 'Not Found'
             if track_uuid:
-                distributor = get_distributor(track_uuid)
-                if distributor:
-                    await ctx.send(f"🎵 **Distributor:** {distributor}")
-                else:
-                    await ctx.send(f"❌ Distributor not found for this track.\n"
-                                  f"UUID: `{track_uuid}`\n"
-                                  f"Add this mapping to `distributors.py` if you know the distributor.")
+                distributor = get_distributor(track_uuid) or 'Not Found'
             else:
-                # Fallback: try using the GID directly, but also show what we found
-                await ctx.send(f"❌ Could not extract UUID from track metadata.\n"
-                              f"Calculated GID: `{gid}`\n"
-                              f"**Please check Railway logs for the full metadata structure.**\n"
-                              f"The UUID we need might be in a different field (like album.gid or label.gid).")
+                # If we couldn't find UUID, show error in distributor field
+                distributor = '❌ UUID not found'
+            
+            # Create embed
+            embed = discord.Embed(
+                title=track_name,
+                color=0x1DB954  # Spotify green
+            )
+            
+            # Add fields
+            embed.add_field(name="Artist", value=artist_names, inline=False)
+            embed.add_field(name="Album", value=album_name, inline=False)
+            embed.add_field(name="Label", value=label, inline=True)
+            embed.add_field(name="ISRC", value=isrc, inline=True)
+            embed.add_field(name="UPC", value=upc, inline=True)
+            embed.add_field(name="Distributor", value=distributor, inline=False)
+            
+            await ctx.send(embed=embed)
                     
     except ValueError as e:
         await ctx.send(f"❌ Invalid Spotify URL: {e}")
