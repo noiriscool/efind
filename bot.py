@@ -149,27 +149,51 @@ async def get_distributor_command(ctx, spotify_link: str = None):
                         isrc = ext_id.get('id', 'Not Found')
                         break
             
-            # Get UPC from album (UPC is album-level, even for singles)
+            # Get UPC from album metadata (UPC is album-level, need to fetch album separately)
             upc = 'Not Found'
-            if isinstance(album_data, dict):
-                # Check various possible UPC fields
-                upc = album_data.get('upc') or album_data.get('upc_code') or album_data.get('barcode')
-                if not upc:
-                    # Sometimes UPC might be in a nested structure
-                    if 'external_id' in album_data:
-                        album_ext_id = album_data['external_id']
-                        if isinstance(album_ext_id, dict) and album_ext_id.get('type') == 'upc':
-                            upc = album_ext_id.get('id', 'Not Found')
-                        elif isinstance(album_ext_id, list):
-                            for ext_id in album_ext_id:
-                                if isinstance(ext_id, dict) and ext_id.get('type') == 'upc':
-                                    upc = ext_id.get('id', 'Not Found')
-                                    break
+            if isinstance(album_data, dict) and 'gid' in album_data:
+                # Get album GID and fetch full album metadata
+                album_gid = album_data['gid']
+                try:
+                    print(f"DEBUG: Fetching album metadata for UPC, album GID: {album_gid}")
+                    album_metadata = spotify_client.get_album_metadata(album_gid)
+                    
+                    # Check various possible UPC fields in album metadata
+                    if isinstance(album_metadata, dict):
+                        upc = album_metadata.get('upc') or album_metadata.get('upc_code') or album_metadata.get('barcode')
+                        if not upc or upc == 'Not Found':
+                            # Check external_id structure
+                            album_ext_id = album_metadata.get('external_id', {})
+                            if isinstance(album_ext_id, dict) and album_ext_id.get('type') == 'upc':
+                                upc = album_ext_id.get('id', 'Not Found')
+                            elif isinstance(album_ext_id, list):
+                                for ext_id in album_ext_id:
+                                    if isinstance(ext_id, dict) and ext_id.get('type') == 'upc':
+                                        upc = ext_id.get('id', 'Not Found')
+                                        break
+                        print(f"DEBUG: Found UPC from album metadata: {upc}")
+                except Exception as e:
+                    print(f"DEBUG: Failed to fetch album metadata for UPC: {e}")
+                    # Fallback: try to get UPC from track's album data if available
+                    if isinstance(album_data, dict):
+                        upc = album_data.get('upc') or album_data.get('upc_code') or album_data.get('barcode')
             
             # Get distributor
             distributor = 'Not Found'
             if track_uuid:
                 distributor = get_distributor(track_uuid) or 'Not Found'
+                
+                # Log unknown UUIDs to private channel
+                if distributor == 'Not Found':
+                    log_channel_id = 1473480422695633057
+                    try:
+                        log_channel = bot.get_channel(log_channel_id)
+                        if log_channel:
+                            await log_channel.send(f"An unknown UUID was found: `{track_uuid}`")
+                        else:
+                            print(f"DEBUG: Could not find log channel {log_channel_id}")
+                    except Exception as e:
+                        print(f"DEBUG: Failed to log unknown UUID: {e}")
             else:
                 # If we couldn't find UUID, show error in distributor field
                 distributor = '❌ UUID not found'
@@ -177,7 +201,7 @@ async def get_distributor_command(ctx, spotify_link: str = None):
             # Create embed
             embed = discord.Embed(
                 title=track_name,
-                description=f"by {artist_names}" if artist_names != 'Unknown' else "",
+                description=f"by **{artist_names}**" if artist_names != 'Unknown' else "",
                 color=0x1DB954  # Spotify green
             )
             
