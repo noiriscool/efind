@@ -1,4 +1,5 @@
 import os
+import asyncio
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -83,8 +84,9 @@ async def get_distributor_command(ctx, spotify_link: str = None):
     try:
         # Show typing indicator
         async with ctx.typing():
-            # Detect if this is an album or track link
+            # Detect if this is an album, artist, or track link
             is_album = '/album/' in spotify_link or spotify_link.startswith('spotify:album:')
+            is_artist = '/artist/' in spotify_link or spotify_link.startswith('spotify:artist:')
             
             if is_album:
                 # Handle album link
@@ -223,6 +225,108 @@ async def get_distributor_command(ctx, spotify_link: str = None):
                 embed.add_field(name="UPC", value=upc, inline=True)
                 embed.add_field(name="Tracks", value=str(track_count) if track_count else "Unknown", inline=True)
                 embed.add_field(name="Distributor", value=distributor, inline=False)
+                
+                await ctx.send(embed=embed)
+                return
+            
+            if is_artist:
+                # Handle artist link
+                artist_id = spotify_client.extract_artist_id_from_url(spotify_link)
+                artist_gid = spotify_client.id_to_gid(artist_id)
+                
+                # Get artist metadata
+                artist_metadata = spotify_client.get_artist_metadata(artist_gid)
+                artist_name = artist_metadata.get('name', 'Unknown')
+                
+                # Get artist profile picture
+                artist_image_url = None
+                if 'portrait_group' in artist_metadata:
+                    portrait_group = artist_metadata['portrait_group']
+                    if isinstance(portrait_group, dict) and 'image' in portrait_group:
+                        images = portrait_group['image']
+                        if isinstance(images, list) and len(images) > 0:
+                            for img in images:
+                                if isinstance(img, dict) and img.get('file_id'):
+                                    if img.get('size') == 'LARGE' or not artist_image_url:
+                                        artist_image_url = f"https://i.scdn.co/image/{img['file_id']}"
+                            if not artist_image_url and images[0].get('file_id'):
+                                artist_image_url = f"https://i.scdn.co/image/{images[0]['file_id']}"
+                        elif isinstance(images, dict) and images.get('file_id'):
+                            artist_image_url = f"https://i.scdn.co/image/{images['file_id']}"
+                
+                # Get all albums for the artist
+                album_gids = spotify_client.get_artist_albums(artist_gid)
+                
+                if not album_gids:
+                    await ctx.send(f"No albums found for {artist_name}.")
+                    return
+                
+                # For each album, get one track and check distributor
+                distributor_counts = {}  # {distributor_name: count}
+                total_albums = len(album_gids)
+                
+                await ctx.send(f"Scanning {total_albums} albums for {artist_name}... This may take a moment.")
+                
+                for i, album_gid in enumerate(album_gids):
+                    try:
+                        # Get album metadata
+                        album_metadata = spotify_client.get_album_metadata(album_gid)
+                        
+                        # Get distributor UUID from album
+                        track_uuid = None
+                        if isinstance(album_metadata, dict):
+                            if 'licensor' in album_metadata and isinstance(album_metadata['licensor'], dict):
+                                if 'uuid' in album_metadata['licensor']:
+                                    track_uuid = album_metadata['licensor']['uuid']
+                        
+                        if track_uuid:
+                            distributor = get_distributor(track_uuid)
+                            if distributor:
+                                distributor_counts[distributor] = distributor_counts.get(distributor, 0) + 1
+                            else:
+                                # Log unknown UUIDs
+                                log_channel_id = 1473480422695633057
+                                try:
+                                    log_channel = bot.get_channel(log_channel_id)
+                                    if log_channel:
+                                        await log_channel.send(f"An unknown UUID was found: `{track_uuid}`\nLink: {spotify_link}\nAlbum: {album_metadata.get('name', 'Unknown')}")
+                                except Exception as e:
+                                    print(f"DEBUG: Failed to log unknown UUID: {e}")
+                        
+                        # Small delay to avoid rate limiting
+                        if i < total_albums - 1:
+                            await asyncio.sleep(0.5)
+                    except Exception as e:
+                        print(f"DEBUG: Error processing album {i+1}/{total_albums}: {e}")
+                        continue
+                
+                # Create embed with distributor report
+                embed = discord.Embed(
+                    title=artist_name,
+                    color=0x1DB954  # Spotify green
+                )
+                
+                # Set artist profile picture as thumbnail
+                if artist_image_url:
+                    embed.set_thumbnail(url=artist_image_url)
+                
+                # Sort distributors by count (descending)
+                sorted_distributors = sorted(distributor_counts.items(), key=lambda x: x[1], reverse=True)
+                
+                if sorted_distributors:
+                    # Format distributor list
+                    distributor_text = "\n".join([f"{name} ({count})" for name, count in sorted_distributors])
+                    embed.add_field(
+                        name=f"Distributors ({total_albums} albums)",
+                        value=distributor_text,
+                        inline=False
+                    )
+                else:
+                    embed.add_field(
+                        name=f"Distributors ({total_albums} albums)",
+                        value="No distributors found",
+                        inline=False
+                    )
                 
                 await ctx.send(embed=embed)
                 return
@@ -429,6 +533,12 @@ def extract_spotify_link(text: str) -> str:
     # Pattern for Spotify album URI
     album_uri_pattern = r'spotify:album:[a-zA-Z0-9]+'
     match = re.search(album_uri_pattern, text)
+    if match:
+        return match.group(0)
+    
+    # Pattern for Spotify artist URI
+    artist_uri_pattern = r'spotify:artist:[a-zA-Z0-9]+'
+    match = re.search(artist_uri_pattern, text)
     if match:
         return match.group(0)
     
