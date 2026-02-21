@@ -432,20 +432,27 @@ class SpotifyClient:
         
         albums = []
         
-        # Check for album_group or albums field
-        if 'album_group' in artist_metadata:
-            album_groups = artist_metadata['album_group']
-            print(f"DEBUG: album_group type: {type(album_groups)}, value: {str(album_groups)[:500]}")
-            if isinstance(album_groups, list):
-                for group in album_groups:
-                    if isinstance(group, dict) and 'album' in group:
-                        albums_data = group['album']
-                        if isinstance(albums_data, list):
-                            for album in albums_data:
-                                if isinstance(album, dict) and 'gid' in album:
-                                    albums.append(album['gid'])
-                        elif isinstance(albums_data, dict) and 'gid' in albums_data:
-                            albums.append(albums_data['gid'])
+        # Check ALL group fields: album_group, single_group, appears_on_group
+        # These might contain different types of releases
+        group_fields = ['album_group', 'single_group', 'appears_on_group']
+        
+        for field_name in group_fields:
+            if field_name in artist_metadata:
+                group_data = artist_metadata[field_name]
+                print(f"DEBUG: {field_name} type: {type(group_data)}, value: {str(group_data)[:500]}")
+                
+                if isinstance(group_data, list):
+                    for group in group_data:
+                        if isinstance(group, dict) and 'album' in group:
+                            albums_data = group['album']
+                            if isinstance(albums_data, list):
+                                for album in albums_data:
+                                    if isinstance(album, dict) and 'gid' in album:
+                                        if album['gid'] not in albums:
+                                            albums.append(album['gid'])
+                            elif isinstance(albums_data, dict) and 'gid' in albums_data:
+                                if albums_data['gid'] not in albums:
+                                    albums.append(albums_data['gid'])
         
         # Also check direct 'albums' field
         if 'albums' in artist_metadata:
@@ -472,15 +479,27 @@ class SpotifyClient:
                     if albums_data['gid'] not in albums:
                         albums.append(albums_data['gid'])
         
+        print(f"DEBUG: Found {len(albums)} albums from metadata groups")
+        
         # Use the artist albums endpoint with pagination as PRIMARY method
         # This endpoint should return all albums, not just a limited set
         all_albums_from_endpoint = []
         
-        # Try multiple possible endpoints
+        # Try multiple possible endpoints - need to find the right one that returns ALL albums
+        # Also try with different query parameters for pagination
         endpoints_to_try = [
-            f'https://spclient.wg.spotify.com/artist-entity-view/v2/spotify/artist/{artist_gid}/releases/all?market=from_token',
-            f'https://spclient.wg.spotify.com/artist-entity-view/v2/spotify/artist/{artist_gid}/releases?market=from_token',
+            # Try browse API with different parameters
+            f'https://spclient.wg.spotify.com/browse/v1/artist/{artist_gid}/albums?market=from_token&limit=50&offset=0',
+            f'https://spclient.wg.spotify.com/browse/v1/artist/{artist_gid}/albums?market=from_token',
+            # Try artistview with pagination
+            f'https://spclient.wg.spotify.com/artistview/v1/artist/{artist_gid}/albums?offset=0&limit=50&market=from_token',
             f'https://spclient.wg.spotify.com/artistview/v1/artist/{artist_gid}/albums?market=from_token',
+            # Try entity-view endpoints
+            f'https://spclient.wg.spotify.com/artist-entity-view/v2/spotify/artist/{artist_gid}/albums?market=from_token&limit=50',
+            f'https://spclient.wg.spotify.com/artist-entity-view/v2/spotify/artist/{artist_gid}/albums?market=from_token',
+            # Try releases endpoints
+            f'https://spclient.wg.spotify.com/artist-entity-view/v2/spotify/artist/{artist_gid}/releases/all?market=from_token&limit=50',
+            f'https://spclient.wg.spotify.com/artist-entity-view/v2/spotify/artist/{artist_gid}/releases?market=from_token&limit=50',
         ]
         
         for endpoint_url in endpoints_to_try:
@@ -543,6 +562,55 @@ class SpotifyClient:
                                 
                                 if album_gid and album_gid not in all_albums_from_endpoint:
                                     all_albums_from_endpoint.append(album_gid)
+                        
+                        # Check if there's pagination - if total > current count, fetch more pages
+                        total_available = None
+                        if isinstance(data, dict):
+                            total_available = data.get('total') or data.get('count')
+                            has_more = data.get('next') is not None or data.get('has_more', False)
+                            print(f"DEBUG: Total available: {total_available}, found so far: {len(all_albums_from_endpoint)}, has_more: {has_more}")
+                            
+                            # If there are more pages, try to fetch them
+                            if has_more and total_available and total_available > len(all_albums_from_endpoint):
+                                offset = len(all_albums_from_endpoint)
+                                limit = 50
+                                while len(all_albums_from_endpoint) < total_available:
+                                    paginated_url = f"{endpoint_url.split('?')[0]}?offset={offset}&limit={limit}&market=from_token"
+                                    print(f"DEBUG: Fetching page at offset {offset}")
+                                    try:
+                                        page_res = self.session.get(paginated_url, timeout=15)
+                                        if page_res.status_code == 200:
+                                            page_data = page_res.json()
+                                            page_releases = []
+                                            if isinstance(page_data, dict):
+                                                page_releases = page_data.get('releases') or page_data.get('items') or page_data.get('albums') or page_data.get('data') or []
+                                            elif isinstance(page_data, list):
+                                                page_releases = page_data
+                                            
+                                            if len(page_releases) == 0:
+                                                break
+                                            
+                                            for release in page_releases:
+                                                if isinstance(release, dict):
+                                                    album_gid = None
+                                                    if 'gid' in release:
+                                                        album_gid = release['gid']
+                                                    elif 'album' in release and isinstance(release['album'], dict) and 'gid' in release['album']:
+                                                        album_gid = release['album']['gid']
+                                                    elif 'uri' in release and 'album:' in release['uri']:
+                                                        album_id = release['uri'].split('album:')[-1]
+                                                        album_gid = self.id_to_gid(album_id)
+                                                    
+                                                    if album_gid and album_gid not in all_albums_from_endpoint:
+                                                        all_albums_from_endpoint.append(album_gid)
+                                            
+                                            offset += limit
+                                            time.sleep(0.2)
+                                        else:
+                                            break
+                                    except Exception as e:
+                                        print(f"DEBUG: Error fetching paginated results: {e}")
+                                        break
                         
                         # If we found albums, use this endpoint and break
                         if len(all_albums_from_endpoint) > 0:
