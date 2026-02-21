@@ -368,6 +368,101 @@ class SpotifyClient:
                 time.sleep(1)
         
         raise Exception("Failed to fetch album metadata after all retries")
+    
+    def get_artist_metadata(self, artist_gid: str, retry_count: int = 3) -> dict:
+        """Get artist metadata from Spotify using artist GID."""
+        url = f'https://spclient.wg.spotify.com/metadata/4/artist/{artist_gid}?market=from_token'
+        
+        # Check if token is expired or about to expire
+        if self.token and self.token_expires_at:
+            current_time_ms = int(time.time() * 1000)
+            time_until_expiry = (self.token_expires_at - current_time_ms) / 1000 / 60
+            if time_until_expiry < 15:
+                try:
+                    self.refresh_auth()
+                    time.sleep(0.5)
+                except Exception as e:
+                    print(f"DEBUG: Proactive refresh failed: {e}")
+        elif not self.token:
+            try:
+                self.refresh_auth()
+                time.sleep(0.5)
+            except Exception as e:
+                print(f"DEBUG: Initial authentication failed: {e}")
+        
+        for attempt in range(retry_count):
+            try:
+                res = self.session.get(url, timeout=15)
+                
+                if res.status_code == 200:
+                    return res.json()
+                elif res.status_code == 401:
+                    try:
+                        self.refresh_auth()
+                        time.sleep(0.5)
+                        res = self.session.get(url, timeout=15)
+                        if res.status_code == 200:
+                            return res.json()
+                    except Exception as e:
+                        print(f"DEBUG: Failed to refresh token for artist: {e}")
+                    
+                    if attempt == retry_count - 1:
+                        raise Exception(f"Authentication failed: 401 Unauthorized for artist metadata")
+                else:
+                    if attempt == retry_count - 1:
+                        raise Exception(f"Failed to fetch artist metadata: {res.status_code} - {res.text[:200]}")
+            except requests.exceptions.ConnectionError as e:
+                if attempt == retry_count - 1:
+                    raise Exception(f"Connection error after {retry_count} attempts: {e}")
+                time.sleep(1)
+            except requests.exceptions.Timeout as e:
+                if attempt == retry_count - 1:
+                    raise Exception(f"Request timed out after {retry_count} attempts: {e}")
+                time.sleep(1)
+        
+        raise Exception("Failed to fetch artist metadata after all retries")
+    
+    def get_artist_albums(self, artist_gid: str, retry_count: int = 3) -> list:
+        """Get all albums for an artist. Returns list of album GIDs."""
+        # First get artist metadata to see album structure
+        artist_metadata = self.get_artist_metadata(artist_gid)
+        
+        albums = []
+        
+        # Check for album_group or albums field
+        if 'album_group' in artist_metadata:
+            album_groups = artist_metadata['album_group']
+            if isinstance(album_groups, list):
+                for group in album_groups:
+                    if isinstance(group, dict) and 'album' in group:
+                        albums_data = group['album']
+                        if isinstance(albums_data, list):
+                            for album in albums_data:
+                                if isinstance(album, dict) and 'gid' in album:
+                                    albums.append(album['gid'])
+                        elif isinstance(albums_data, dict) and 'gid' in albums_data:
+                            albums.append(albums_data['gid'])
+        
+        # Also check direct 'albums' field
+        if 'albums' in artist_metadata:
+            albums_data = artist_metadata['albums']
+            if isinstance(albums_data, list):
+                for album in albums_data:
+                    if isinstance(album, dict) and 'gid' in album:
+                        if album['gid'] not in albums:
+                            albums.append(album['gid'])
+            elif isinstance(albums_data, dict):
+                if 'items' in albums_data:
+                    for album in albums_data['items']:
+                        if isinstance(album, dict) and 'gid' in album:
+                            if album['gid'] not in albums:
+                                albums.append(album['gid'])
+                elif 'gid' in albums_data:
+                    if albums_data['gid'] not in albums:
+                        albums.append(albums_data['gid'])
+        
+        print(f"DEBUG: Found {len(albums)} albums for artist")
+        return albums
 
     def extract_track_id_from_url(self, spotify_url: str) -> str:
         """Extract base62 track ID from Spotify URL."""
@@ -420,4 +515,28 @@ class SpotifyClient:
             raise ValueError(f"Invalid album ID format: {album_id}")
         
         return album_id
+    
+    def extract_artist_id_from_url(self, spotify_url: str) -> str:
+        """Extract base62 artist ID from Spotify URL."""
+        # Handle various Spotify artist URL formats:
+        # https://open.spotify.com/artist/4iV5W9uYEdYUVa79Axb7Rh
+        # https://open.spotify.com/intl-it/artist/4iV5W9uYEdYUVa79Axb7Rh (international)
+        # https://spotify.com/artist/4iV5W9uYEdYUVa79Axb7Rh
+        # spotify:artist:4iV5W9uYEdYUVa79Axb7Rh
+        
+        # Handle international URLs with /intl-XX/ path
+        if '/intl-' in spotify_url and '/artist/' in spotify_url:
+            artist_id = spotify_url.split('/artist/')[-1].split('?')[0]
+        elif 'spotify.com/artist/' in spotify_url:
+            artist_id = spotify_url.split('artist/')[-1].split('?')[0]
+        elif spotify_url.startswith('spotify:artist:'):
+            artist_id = spotify_url.replace('spotify:artist:', '')
+        else:
+            raise ValueError("Invalid Spotify artist URL format")
+        
+        # Validate artist ID (should be base62 characters)
+        if not artist_id or not all(c.isalnum() for c in artist_id):
+            raise ValueError(f"Invalid artist ID format: {artist_id}")
+        
+        return artist_id
 
