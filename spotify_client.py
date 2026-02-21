@@ -472,16 +472,20 @@ class SpotifyClient:
                     if albums_data['gid'] not in albums:
                         albums.append(albums_data['gid'])
         
-        # Try using the artist albums endpoint directly with pagination
-        # Spotify might have a dedicated endpoint for artist albums
-        try:
-            # Try fetching albums with pagination
-            offset = 0
-            limit = 50
-            all_albums_from_endpoint = []
-            
-            while True:
-                url = f'https://spclient.wg.spotify.com/artist-entity-view/v2/spotify/artist/{artist_gid}/releases?offset={offset}&limit={limit}&market=from_token'
+        # Use the artist albums endpoint with pagination as PRIMARY method
+        # This endpoint should return all albums, not just a limited set
+        all_albums_from_endpoint = []
+        
+        # Try multiple possible endpoints
+        endpoints_to_try = [
+            f'https://spclient.wg.spotify.com/artist-entity-view/v2/spotify/artist/{artist_gid}/releases/all?market=from_token',
+            f'https://spclient.wg.spotify.com/artist-entity-view/v2/spotify/artist/{artist_gid}/releases?market=from_token',
+            f'https://spclient.wg.spotify.com/artistview/v1/artist/{artist_gid}/albums?market=from_token',
+        ]
+        
+        for endpoint_url in endpoints_to_try:
+            try:
+                print(f"DEBUG: Trying endpoint: {endpoint_url}")
                 
                 # Check token
                 if self.token and self.token_expires_at:
@@ -494,29 +498,42 @@ class SpotifyClient:
                         except Exception as e:
                             print(f"DEBUG: Proactive refresh failed: {e}")
                 
-                res = self.session.get(url, timeout=15)
+                res = self.session.get(endpoint_url, timeout=15)
+                print(f"DEBUG: Endpoint response status: {res.status_code}")
+                
                 if res.status_code == 200:
                     data = res.json()
-                    print(f"DEBUG: Artist releases endpoint response keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+                    print(f"DEBUG: Endpoint response keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+                    print(f"DEBUG: Endpoint response (first 1000 chars): {str(data)[:1000]}")
                     
                     # Check various possible structures
                     releases = []
-                    if 'releases' in data:
-                        releases = data['releases']
-                    elif 'items' in data:
-                        releases = data['items']
+                    if isinstance(data, dict):
+                        if 'releases' in data:
+                            releases = data['releases']
+                        elif 'items' in data:
+                            releases = data['items']
+                        elif 'albums' in data:
+                            releases = data['albums']
+                        elif 'data' in data:
+                            releases = data['data']
                     elif isinstance(data, list):
                         releases = data
                     
-                    if isinstance(releases, list):
+                    if isinstance(releases, list) and len(releases) > 0:
+                        print(f"DEBUG: Found {len(releases)} releases/albums in response")
                         for release in releases:
                             if isinstance(release, dict):
                                 # Get album GID from various possible locations
                                 album_gid = None
                                 if 'gid' in release:
                                     album_gid = release['gid']
-                                elif 'album' in release and isinstance(release['album'], dict) and 'gid' in release['album']:
-                                    album_gid = release['album']['gid']
+                                elif 'album' in release:
+                                    if isinstance(release['album'], dict) and 'gid' in release['album']:
+                                        album_gid = release['album']['gid']
+                                    elif isinstance(release['album'], str):
+                                        # Might be a GID string
+                                        album_gid = release['album']
                                 elif 'uri' in release:
                                     # Extract from URI like spotify:album:...
                                     uri = release['uri']
@@ -526,35 +543,30 @@ class SpotifyClient:
                                 
                                 if album_gid and album_gid not in all_albums_from_endpoint:
                                     all_albums_from_endpoint.append(album_gid)
-                    
-                    # Check if there are more pages
-                    has_more = False
-                    if isinstance(data, dict):
-                        has_more = data.get('next') is not None or data.get('has_more', False)
-                        total = data.get('total', len(all_albums_from_endpoint))
-                        print(f"DEBUG: Page offset {offset}: found {len(all_albums_from_endpoint)} albums, total: {total}, has_more: {has_more}")
-                    
-                    if not has_more or len(releases) == 0:
-                        break
-                    
-                    offset += limit
-                    time.sleep(0.2)  # Small delay between requests
+                        
+                        # If we found albums, use this endpoint and break
+                        if len(all_albums_from_endpoint) > 0:
+                            print(f"DEBUG: Successfully found {len(all_albums_from_endpoint)} albums from endpoint")
+                            albums = all_albums_from_endpoint  # Replace with endpoint results
+                            break
                 elif res.status_code == 404:
-                    # Endpoint might not exist, fall back to metadata
-                    print(f"DEBUG: Artist releases endpoint returned 404, using metadata only")
-                    break
+                    print(f"DEBUG: Endpoint returned 404, trying next endpoint")
+                    continue
                 else:
-                    print(f"DEBUG: Artist releases endpoint returned {res.status_code}, using metadata only")
-                    break
-            
-            # Merge results
-            for album_gid in all_albums_from_endpoint:
-                if album_gid not in albums:
-                    albums.append(album_gid)
-            
-            print(f"DEBUG: After checking releases endpoint, total albums: {len(albums)}")
-        except Exception as e:
-            print(f"DEBUG: Error fetching from releases endpoint: {e}")
+                    print(f"DEBUG: Endpoint returned {res.status_code}: {res.text[:200]}")
+                    continue
+            except Exception as e:
+                print(f"DEBUG: Error with endpoint {endpoint_url}: {e}")
+                continue
+        
+        # If we didn't get albums from endpoints, merge with metadata results
+        if len(all_albums_from_endpoint) == 0:
+            print(f"DEBUG: No albums from endpoints, using metadata results: {len(albums)} albums")
+            # Merge any albums we found from metadata
+            for album_gid in albums:
+                if album_gid not in all_albums_from_endpoint:
+                    all_albums_from_endpoint.append(album_gid)
+            albums = all_albums_from_endpoint
         
         print(f"DEBUG: Final album count: {len(albums)}")
         return albums
